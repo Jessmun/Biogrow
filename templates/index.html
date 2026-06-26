@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Científico de Germinación y Biometría</title>
+    <!-- Google Fonts & FontAwesome -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-weight/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="/styles/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <!-- Header -->
+    <header>
+        <div class="logo-section">
+            <i class="fa-solid fa-seedling logo-icon"></i>
+            <div class="header-titles">
+                <h1>BioGrow Analytics</h1>
+                <p>Monitor de Germinación y Biometría de Semillas</p>
+            </div>
+        </div>
+        <div id="status-container" class="status-badge">
+            <span class="status-dot"></span>
+            <span id="status-text">Conectado al Servidor</span>
+        </div>
+    </header>
+    <!-- KPI Summary Cards -->
+    <section class="grid grid-cols-4">
+        <div class="card kpi-card primary">
+            <div>
+                <p class="kpi-title">Muestras Totales</p>
+                <h3 class="kpi-value" id="kpi-total">0</h3>
+            </div>
+            <div class="kpi-icon-wrapper">
+                <i class="fa-solid fa-flask-vial fa-lg"></i>
+            </div>
+        </div>
+
+        <div class="card kpi-card secondary">
+            <div>
+                <p class="kpi-title">Tasa de Germinación</p>
+                <h3 class="kpi-value" id="kpi-germination">0%</h3>
+            </div>
+            <div class="kpi-icon-wrapper">
+                <i class="fa-solid fa-percent fa-lg"></i>
+            </div>
+        </div>
+        <div class="card kpi-card warning">
+            <div>
+                <p class="kpi-title">Media Raíz</p>
+                <h3 class="kpi-value" id="kpi-avg-root">0 mm</h3>
+            </div>
+            <div class="kpi-icon-wrapper">
+                <i class="fa-solid fa-ruler-horizontal fa-lg"></i>
+            </div>
+        </div>
+        <div class="card kpi-card danger">
+            <div>
+                <p class="kpi-title">Media Tallo</p>
+                <h3 class="kpi-value" id="kpi-avg-stem">0 mm</h3>
+            </div>
+            <div class="kpi-icon-wrapper">
+                <i class="fa-solid fa-ruler-vertical fa-lg"></i>
+            </div>
+        </div>
+    </section>
+    <!-- Main Workspace -->
+    <main class="grid grid-cols-layout">
+
+        <!-- Left Column (Chart and Table) -->
+        <div class="grid" style="gap: 24px;">
+            <!-- Chart Card -->
+            <div class="card">
+                <div class="section-header">
+                    <h2>Análisis Biométrico Promedio por Tratamiento</h2>
+                </div>
+                <div style="height: 320px; position: relative;">
+                    <canvas id="graficoBiometria"></canvas>
+                </div>
+            </div>
+            <!-- Table Card with Filter Operations -->
+            <div class="card">
+                <div class="section-header">
+                    <h2>Historial Consolidado (Estructura SQL)</h2>
+                </div>
+
+                <!-- Filters -->
+                <div class="filter-bar">
+                    <div class="search-input-wrapper">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="search-filter" class="input-control"
+                            placeholder="Buscar por lote, tratamiento o semilla...">
+                    </div>
+
+                    <select id="seed-filter" class="input-control filter-select">
+                        <option value="">Todas las semillas</option>
+                        <option value="Semilla-B">Semilla B (Blanca)</option>
+                        <option value="Semilla-Rosa">Semilla R (Rosa)</option>
+                    </select>
+                    <select id="status-filter" class="input-control filter-select">
+                        <option value="">Todos los estados</option>
+                        <option value="1">Germinó</option>
+                        <option value="0">No Germinó</option>
+                    </select>
+                </div>
+                <!-- Table Wrapper -->
+                <div class="table-wrapper">
+                    <table id="datos-tabla">
+                        <thead>
+                            <tr>
+                                <th>Lote Origen</th>
+                                <th>Tipo de Semilla</th>
+                                <th>No. Muestra</th>
+                                <th>Tratamiento</th>
+                                <th>Raíz (mm)</th>
+                                <th>Tallo (mm)</th>
+                                <th>Resultado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-body">
+                            <!-- Rows will be injected here dynamically -->
+                        </tbody>
+                    </table>
+                    <div id="no-data-msg" class="empty-state" style="display: none;">
+                        <i class="fa-solid fa-database"></i>
+                        <p>No se encontraron registros que coincidan con los filtros.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Right Column (Form to Register Sample) -->
+        <aside>
+            <div class="card">
+                <div class="section-header">
+                    <h2>📥 Registro de Muestra</h2>
+                </div>
+                <form id="formulario-registro" action="/insertar_muestra" method="POST">
+                    <div class="form-group">
+                        <label for="nombre_lote">Identificador del Lote/Excel</label>
+                        <input type="text" id="nombre_lote" name="nombre_lote" class="input-control"
+                            placeholder="Ej: Lote 16-Mayo" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="tipo_semilla">Variedad de Semilla</label>
+                        <select id="tipo_semilla" name="tipo_semilla" class="input-control">
+                            <option value="Semilla-B">Semilla B (Blanca)</option>
+                            <option value="Semilla-Rosa">Semilla Rosa</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="num_muestra">No. Muestra (Muestra Individual)</label>
+                        <input type="number" id="num_muestra" name="num_muestra" class="input-control" min="1" value="1"
+                            required>
+                    </div>
+                    <div class="form-group">
+                        <label for="condicion_tratamiento">Condición Ambiental / Tratamiento</label>
+                        <input type="text" id="condicion_tratamiento" name="condicion_tratamiento" class="input-control"
+                            placeholder="Ej: T-1M o 45s" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="longitud_raiz">Longitud Raíz (mm)</label>
+                        <input type="number" step="0.01" id="longitud_raiz" name="longitud_raiz" class="input-control"
+                            min="0" value="0.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="longitud_tallo">Longitud Tallo (mm)</label>
+                        <input type="number" step="0.01" id="longitud_tallo" name="longitud_tallo" class="input-control"
+                            min="0" value="0.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="germino">Estado Vital</label>
+                        <select id="germino" name="germino" class="input-control">
+                            <option value="1">Germinó (1)</option>
+                            <option value="0">No Germinó (0)</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn" id="btn-submit">
+                        <i class="fa-solid fa-plus btn-icon"></i> Indexar Muestra
+                    </button>
+                </form>
+            </div>
+        </aside>
+    </main>
+    <!-- JSON Bootstrap data injected securely from Jinja -->
+    <script id="data-bootstrap" type="application/json">{{ datos | tojson if datos else '[]' }}</script>
+    <!-- Application Script -->
+    <script>
+        // Check for local mode versus server-rendered mode
+        const rawJsonElement = document.getElementById('data-bootstrap');
+        let rawJsonText = rawJsonElement ? rawJsonElement.textContent.trim() : '';
+        let isLocalMode = false;
+        let originalData = [];
+        // Check if rawJsonText contains unparsed Jinja brackets
+        if (!rawJsonText || rawJsonText.startsWith('{' + '{')) {
+            isLocalMode = true;
+            console.log("Modo local activado: Cargando datos simulados.");
+            // Hydrate with high quality mock data for representation
+            originalData = [
+                { nombre_lote: "Lote A-1", tipo_semilla: "Semilla-B", num_muestra: 1, condicion_tratamiento: "T-1M", longitud_raiz: 12.5, longitud_tallo: 15.2, germino: 1 },
+                { nombre_lote: "Lote A-1", tipo_semilla: "Semilla-B", num_muestra: 2, condicion_tratamiento: "T-1M", longitud_raiz: 10.1, longitud_tallo: 11.4, germino: 1 },
+                { nombre_lote: "LOTE B-4", tipo_semilla: "Semilla-Rosa", num_muestra: 1, condicion_tratamiento: "45s", longitud_raiz: 3.1, longitud_tallo: 4.0, germino: 0 },
+                { nombre_lote: "LOTE B-4", tipo_semilla: "Semilla-Rosa", num_muestra: 2, condicion_tratamiento: "45s", longitud_raiz: 14.1, longitud_tallo: 11.2, germino: 1 },
+                { nombre_lote: "Lote C-10", tipo_semilla: "Semilla-B", num_muestra: 1, condicion_tratamiento: "Control", longitud_raiz: 9.0, longitud_tallo: 10.5, germino: 1 },
+                { nombre_lote: "Lote C-10", tipo_semilla: "Semilla-Rosa", num_muestra: 2, condicion_tratamiento: "Control", longitud_raiz: 0.0, longitud_tallo: 0.0, germino: 0 }
+            ];
+            // Update UI status to local mode
+            const statusBadge = document.getElementById('status-container');
+            const statusText = document.getElementById('status-text');
+            if (statusBadge && statusText) {
+                statusBadge.classList.add('offline');
+                statusText.innerText = 'Modo Local (Demo)';
+            }
+        } else {
+            try {
+                originalData = JSON.parse(rawJsonText);
+            } catch (e) {
+                console.error("Error al procesar los datos del servidor. Usando fallback local.", e);
+                originalData = [];
+            }
+        }
+        // Global state of active filters
+        let activeData = [...originalData];
+        let chartInstance = null;
+        // Dom Elements
+        const tableBody = document.getElementById('tabla-body');
+        const noDataMsg = document.getElementById('no-data-msg');
+        const kpiTotal = document.getElementById('kpi-total');
+        const kpiGermination = document.getElementById('kpi-germination');
+        const kpiAvgRoot = document.getElementById('kpi-avg-root');
+        const kpiAvgStem = document.getElementById('kpi-avg-stem');
+
+        // Filter Inputs
+        const searchInput = document.getElementById('search-filter');
+        const seedFilter = document.getElementById('seed-filter');
+        const statusFilter = document.getElementById('status-filter');
+        const mainForm = document.getElementById('formulario-registro');
+        // Functions
+        function renderDashboard() {
+            // Apply filtering logic to activeData
+            const query = searchInput.value.toLowerCase().trim();
+            const seedType = seedFilter.value;
+            const statusVal = statusFilter.value;
+            activeData = originalData.filter(item => {
+                const matchSearch = !query ||
+                    (item.nombre_lote && item.nombre_lote.toLowerCase().includes(query)) ||
+                    (item.condicion_tratamiento && item.condicion_tratamiento.toLowerCase().includes(query)) ||
+                    (item.tipo_semilla && item.tipo_semilla.toLowerCase().includes(query));
+
+                const matchSeed = !seedType || item.tipo_semilla === seedType;
+                const matchStatus = !statusVal || String(item.germino) === statusVal;
+                return matchSearch && matchSeed && matchStatus;
+            });
+            // Update KPIs
+            updateKPIs(activeData);
+            // Render Table
+            renderTable(activeData);
+            // Update Chart
+            updateChart(activeData);
+        }
+        function updateKPIs(data) {
+            const total = data.length;
+            kpiTotal.innerText = total;
+            if (total === 0) {
+                kpiGermination.innerText = '0%';
+                kpiAvgRoot.innerText = '0.00 mm';
+                kpiAvgStem.innerText = '0.00 mm';
+                return;
+            }
+            const germinatedCount = data.filter(item => Number(item.germino) === 1).length;
+            const germinationRate = ((germinatedCount / total) * 100).toFixed(1);
+            kpiGermination.innerText = `${germinationRate}%`;
+            const totalRoot = data.reduce((sum, item) => sum + parseFloat(item.longitud_raiz || 0), 0);
+            const totalStem = data.reduce((sum, item) => sum + parseFloat(item.longitud_tallo || 0), 0);
+            kpiAvgRoot.innerText = `${(totalRoot / total).toFixed(2)} mm`;
+            kpiAvgStem.innerText = `${(totalStem / total).toFixed(2)} mm`;
+        }
+        function renderTable(data) {
+            tableBody.innerHTML = '';
+            if (data.length === 0) {
+                noDataMsg.style.display = 'block';
+                return;
+            }
+            noDataMsg.style.display = 'none';
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+
+                // Class/style for badge
+                const isGerminated = Number(item.germino) === 1;
+                const badgeClass = isGerminated ? 'badge-success' : 'badge-danger';
+                const badgeText = isGerminated ? '<i class="fa-solid fa-circle-check"></i> Germinó' : '<i class="fa-solid fa-circle-xmark"></i> Inactiva';
+
+                tr.innerHTML = `
+                    <td>${escapeHtml(item.nombre_lote)}</td>
+                    <td><span class="badge badge-pill">${escapeHtml(item.tipo_semilla)}</span></td>
+                    <td>${item.num_muestra}</td>
+                    <td><code>${escapeHtml(item.condicion_tratamiento)}</code></td>
+                    <td>${parseFloat(item.longitud_raiz).toFixed(2)} mm</td>
+                    <td>${parseFloat(item.longitud_tallo).toFixed(2)} mm</td>
+                    <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+        function updateChart(data) {
+            const grouping = {};
+
+            data.forEach(item => {
+                const cond = item.condicion_tratamiento || 'N/A';
+                if (!grouping[cond]) {
+                    grouping[cond] = { raizAcumulada: 0, talloAcumulado: 0, count: 0 };
+                }
+                grouping[cond].raizAcumulada += parseFloat(item.longitud_raiz || 0);
+                grouping[cond].talloAcumulado += parseFloat(item.longitud_tallo || 0);
+                grouping[cond].count += 1;
+            });
+            const labels = Object.keys(grouping);
+            const roots = labels.map(l => (grouping[l].raizAcumulada / grouping[l].count).toFixed(2));
+            const stems = labels.map(l => (grouping[l].talloAcumulado / grouping[l].count).toFixed(2));
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+            const ctx = document.getElementById('graficoBiometria').getContext('2d');
+
+            // Create gradients for the chart
+            const rootGradient = ctx.createLinearGradient(0, 0, 0, 300);
+            rootGradient.addColorStop(0, 'rgba(16, 185, 129, 0.8)');
+            rootGradient.addColorStop(1, 'rgba(16, 185, 129, 0.1)');
+            const stemGradient = ctx.createLinearGradient(0, 0, 0, 300);
+            stemGradient.addColorStop(0, 'rgba(99, 102, 241, 0.8)');
+            stemGradient.addColorStop(1, 'rgba(99, 102, 241, 0.1)');
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Media Raíz (mm)',
+                            data: roots,
+                            backgroundColor: rootGradient,
+                            borderColor: '#10b981',
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            borderSkipped: false
+                        },
+                        {
+                            label: 'Media Tallo (mm)',
+                            data: stems,
+                            backgroundColor: stemGradient,
+                            borderColor: '#6366f1',
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            borderSkipped: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#94a3b8',
+                                font: {
+                                    family: 'Outfit',
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                            titleFont: { family: 'Outfit', size: 13, weight: 'bold' },
+                            bodyFont: { family: 'Outfit', size: 12 },
+                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderWidth: 1,
+                            padding: 12,
+                            cornerRadius: 8
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#94a3b8', font: { family: 'Outfit' } },
+                            title: { display: true, text: 'Milímetros (mm)', color: '#94a3b8', font: { family: 'Outfit' } }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#94a3b8', font: { family: 'Outfit' } },
+                            title: { display: true, text: 'Tratamientos', color: '#94a3b8', font: { family: 'Outfit' } }
+                        }
+                    }
+                }
+            });
+        }
+        // Prevent XSS
+        function escapeHtml(unsafe) {
+            return (unsafe || '')
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        // Register event listeners
+        searchInput.addEventListener('input', renderDashboard);
+        seedFilter.addEventListener('change', renderDashboard);
+        statusFilter.addEventListener('change', renderDashboard);
+        // Intercept form submission if in local mock mode to simulate database adding
+        mainForm.addEventListener('submit', function (e) {
+            if (isLocalMode) {
+                e.preventDefault();
+
+                const newRecord = {
+                    nombre_lote: document.getElementById('nombre_lote').value,
+                    tipo_semilla: document.getElementById('tipo_semilla').value,
+                    num_muestra: parseInt(document.getElementById('num_muestra').value, 10),
+                    condicion_tratamiento: document.getElementById('condicion_tratamiento').value,
+                    longitud_raiz: parseFloat(document.getElementById('longitud_raiz').value),
+                    longitud_tallo: parseFloat(document.getElementById('longitud_tallo').value),
+                    germino: parseInt(document.getElementById('germino').value, 10)
+                };
+                originalData.push(newRecord);
+                renderDashboard();
+
+                // Clear the form fields (except defaults)
+                mainForm.reset();
+                document.getElementById('num_muestra').value = 1;
+                document.getElementById('longitud_raiz').value = "0.00";
+                document.getElementById('longitud_tallo').value = "0.00";
+                // Visual response indicating success
+                const btn = document.getElementById('btn-submit');
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-check"></i> ¡Indexado con éxito!';
+                btn.style.background = '#059669';
+                setTimeout(() => {
+                    btn.innerHTML = origHtml;
+                    btn.style.background = '';
+                }, 2000);
+            }
+        });
+        // Initialize App on load
+        renderDashboard();
+    </script>
+</body>
+
+</html>
