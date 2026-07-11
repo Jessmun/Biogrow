@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Científico de Germinación y Biometría</title>
+    <title>BioGrow Analytics - Registro de Muestra</title>
     <!-- Google Fonts & FontAwesome -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +13,145 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-weight/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link rel="stylesheet" href="/styles/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Main Workspace container */
+        .main-workspace {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 32px;
+            width: 100%;
+            padding: 24px 0 64px 0;
+        }
+
+        .form-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Subtle glowing background aura behind the form */
+        .form-container::before {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(16, 185, 129, 0.06) 0%, transparent 70%);
+            z-index: 0;
+            pointer-events: none;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        
+        .form-card {
+            width: 100%;
+            max-width: 960px;
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            z-index: 1;
+        }
+
+        .general-fields-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+            background: rgba(15, 23, 42, 0.3);
+            padding: 20px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .capture-table-container {
+            overflow-x: auto;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--card-border);
+            margin-bottom: 24px;
+        }
+
+        .capture-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        .capture-table th, .capture-table td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .capture-table th {
+            background: rgba(15, 23, 42, 0.5);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .capture-table tr:hover {
+            background: rgba(16, 185, 129, 0.03);
+        }
+
+        .capture-table td.cell-no {
+            font-weight: 700;
+            color: var(--accent-primary);
+            width: 80px;
+            text-align: center;
+        }
+
+        .capture-table td.cell-input {
+            width: 250px;
+        }
+
+        .capture-table td.cell-status {
+            width: 200px;
+            text-align: center;
+        }
+
+        .table-input-control {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-sm);
+            padding: 6px 12px;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            transition: var(--transition-smooth);
+            text-align: right;
+        }
+
+        .table-input-control:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            background: rgba(15, 23, 42, 0.9);
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+        }
+
+        .badge-inactive {
+            background: rgba(148, 163, 184, 0.1);
+            color: var(--text-secondary);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .table-container {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .table-card {
+            width: 100%;
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
 </head>
 
 <body>
@@ -31,62 +169,66 @@
             <span id="status-text">Conectado al Servidor</span>
         </div>
     </header>
-    <!-- KPI Summary Cards -->
-    <section class="grid grid-cols-4">
-        <div class="card kpi-card primary">
-            <div>
-                <p class="kpi-title">Muestras Totales</p>
-                <h3 class="kpi-value" id="kpi-total">0</h3>
-            </div>
-            <div class="kpi-icon-wrapper">
-                <i class="fa-solid fa-flask-vial fa-lg"></i>
-            </div>
-        </div>
 
-        <div class="card kpi-card secondary">
-            <div>
-                <p class="kpi-title">Tasa de Germinación</p>
-                <h3 class="kpi-value" id="kpi-germination">0%</h3>
-            </div>
-            <div class="kpi-icon-wrapper">
-                <i class="fa-solid fa-percent fa-lg"></i>
-            </div>
-        </div>
-        <div class="card kpi-card warning">
-            <div>
-                <p class="kpi-title">Media Raíz</p>
-                <h3 class="kpi-value" id="kpi-avg-root">0 mm</h3>
-            </div>
-            <div class="kpi-icon-wrapper">
-                <i class="fa-solid fa-ruler-horizontal fa-lg"></i>
-            </div>
-        </div>
-        <div class="card kpi-card danger">
-            <div>
-                <p class="kpi-title">Media Tallo</p>
-                <h3 class="kpi-value" id="kpi-avg-stem">0 mm</h3>
-            </div>
-            <div class="kpi-icon-wrapper">
-                <i class="fa-solid fa-ruler-vertical fa-lg"></i>
-            </div>
-        </div>
-    </section>
     <!-- Main Workspace -->
-    <main class="grid grid-cols-layout">
-
-        <!-- Left Column (Chart and Table) -->
-        <div class="grid" style="gap: 24px;">
-            <!-- Chart Card -->
-            <div class="card">
+    <main class="main-workspace">
+        <div class="form-container">
+            <div class="card form-card">
                 <div class="section-header">
-                    <h2>Análisis Biométrico Promedio por Tratamiento</h2>
+                    <h2>📥 Registro de Muestra por Lote</h2>
                 </div>
-                <div style="height: 320px; position: relative;">
-                    <canvas id="graficoBiometria"></canvas>
-                </div>
+                <form id="formulario-registro" onsubmit="return false;">
+                    <!-- Campos Generales -->
+                    <div class="general-fields-grid">
+                        <div class="form-group">
+                            <label for="nombre_lote">Identificador del Lote/Excel</label>
+                            <input type="text" id="nombre_lote" name="nombre_lote" class="input-control"
+                                placeholder="Ej: Lote 16-Mayo" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="tipo_semilla">Variedad de Semilla</label>
+                            <select id="tipo_semilla" name="tipo_semilla" class="input-control">
+                                <option value="Semilla-B">Semilla B (Blanca)</option>
+                                <option value="Semilla-Rosa">Semilla Rosa</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="fecha_registro">Fecha de Registro</label>
+                            <input type="datetime-local" id="fecha_registro" name="fecha_registro" class="input-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="tiempo_tratamiento">Tiempo de Tratamiento</label>
+                            <input type="text" id="tiempo_tratamiento" name="tiempo_tratamiento" class="input-control"
+                                placeholder="Ej: 45s, Control, T-1M" required>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de Captura de 27 filas -->
+                    <div class="capture-table-container">
+                        <table class="capture-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: center;">No.</th>
+                                    <th>Longitud Raíz (mm)</th>
+                                    <th>Longitud Tallo (mm)</th>
+                                    <th style="text-align: center;">Estado de Germinación</th>
+                                </tr>
+                            </thead>
+                            <tbody id="capture-table-body">
+                                <!-- Filas generadas dinámicamente -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <button type="button" class="btn" id="btn-save-batch">
+                        <i class="fa-solid fa-floppy-disk btn-icon"></i> Guardar Registro
+                    </button>
+                </form>
             </div>
-            <!-- Table Card with Filter Operations -->
-            <div class="card">
+        </div>
+
+        <div class="table-container">
+            <div class="card table-card">
                 <div class="section-header">
                     <h2>Historial Consolidado (Estructura SQL)</h2>
                 </div>
@@ -135,59 +277,8 @@
                 </div>
             </div>
         </div>
-        <!-- Right Column (Form to Register Sample) -->
-        <aside>
-            <div class="card">
-                <div class="section-header">
-                    <h2>📥 Registro de Muestra</h2>
-                </div>
-                <form id="formulario-registro" action="/insertar_muestra" method="POST">
-                    <div class="form-group">
-                        <label for="nombre_lote">Identificador del Lote/Excel</label>
-                        <input type="text" id="nombre_lote" name="nombre_lote" class="input-control"
-                            placeholder="Ej: Lote 16-Mayo" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="tipo_semilla">Variedad de Semilla</label>
-                        <select id="tipo_semilla" name="tipo_semilla" class="input-control">
-                            <option value="Semilla-B">Semilla B (Blanca)</option>
-                            <option value="Semilla-Rosa">Semilla Rosa</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="num_muestra">No. Muestra (Muestra Individual)</label>
-                        <input type="number" id="num_muestra" name="num_muestra" class="input-control" min="1" value="1"
-                            required>
-                    </div>
-                    <div class="form-group">
-                        <label for="condicion_tratamiento">Condición Ambiental / Tratamiento</label>
-                        <input type="text" id="condicion_tratamiento" name="condicion_tratamiento" class="input-control"
-                            placeholder="Ej: T-1M o 45s" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="longitud_raiz">Longitud Raíz (mm)</label>
-                        <input type="number" step="0.01" id="longitud_raiz" name="longitud_raiz" class="input-control"
-                            min="0" value="0.00" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="longitud_tallo">Longitud Tallo (mm)</label>
-                        <input type="number" step="0.01" id="longitud_tallo" name="longitud_tallo" class="input-control"
-                            min="0" value="0.00" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="germino">Estado Vital</label>
-                        <select id="germino" name="germino" class="input-control">
-                            <option value="1">Germinó (1)</option>
-                            <option value="0">No Germinó (0)</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="btn" id="btn-submit">
-                        <i class="fa-solid fa-plus btn-icon"></i> Indexar Muestra
-                    </button>
-                </form>
-            </div>
-        </aside>
     </main>
+
     <!-- JSON Bootstrap data injected securely from Jinja -->
     <script id="data-bootstrap" type="application/json">{{ datos | tojson if datos else '[]' }}</script>
     <!-- Application Script -->
@@ -197,6 +288,7 @@
         let rawJsonText = rawJsonElement ? rawJsonElement.textContent.trim() : '';
         let isLocalMode = false;
         let originalData = [];
+        
         // Check if rawJsonText contains unparsed Jinja brackets
         if (!rawJsonText || rawJsonText.startsWith('{' + '{')) {
             isLocalMode = true;
@@ -225,22 +317,20 @@
                 originalData = [];
             }
         }
+
         // Global state of active filters
         let activeData = [...originalData];
-        let chartInstance = null;
+
         // Dom Elements
         const tableBody = document.getElementById('tabla-body');
         const noDataMsg = document.getElementById('no-data-msg');
-        const kpiTotal = document.getElementById('kpi-total');
-        const kpiGermination = document.getElementById('kpi-germination');
-        const kpiAvgRoot = document.getElementById('kpi-avg-root');
-        const kpiAvgStem = document.getElementById('kpi-avg-stem');
 
         // Filter Inputs
         const searchInput = document.getElementById('search-filter');
         const seedFilter = document.getElementById('seed-filter');
         const statusFilter = document.getElementById('status-filter');
         const mainForm = document.getElementById('formulario-registro');
+
         // Functions
         function renderDashboard() {
             // Apply filtering logic to activeData
@@ -257,30 +347,10 @@
                 const matchStatus = !statusVal || String(item.germino) === statusVal;
                 return matchSearch && matchSeed && matchStatus;
             });
-            // Update KPIs
-            updateKPIs(activeData);
             // Render Table
             renderTable(activeData);
-            // Update Chart
-            updateChart(activeData);
         }
-        function updateKPIs(data) {
-            const total = data.length;
-            kpiTotal.innerText = total;
-            if (total === 0) {
-                kpiGermination.innerText = '0%';
-                kpiAvgRoot.innerText = '0.00 mm';
-                kpiAvgStem.innerText = '0.00 mm';
-                return;
-            }
-            const germinatedCount = data.filter(item => Number(item.germino) === 1).length;
-            const germinationRate = ((germinatedCount / total) * 100).toFixed(1);
-            kpiGermination.innerText = `${germinationRate}%`;
-            const totalRoot = data.reduce((sum, item) => sum + parseFloat(item.longitud_raiz || 0), 0);
-            const totalStem = data.reduce((sum, item) => sum + parseFloat(item.longitud_tallo || 0), 0);
-            kpiAvgRoot.innerText = `${(totalRoot / total).toFixed(2)} mm`;
-            kpiAvgStem.innerText = `${(totalStem / total).toFixed(2)} mm`;
-        }
+
         function renderTable(data) {
             tableBody.innerHTML = '';
             if (data.length === 0) {
@@ -308,96 +378,7 @@
                 tableBody.appendChild(tr);
             });
         }
-        function updateChart(data) {
-            const grouping = {};
 
-            data.forEach(item => {
-                const cond = item.condicion_tratamiento || 'N/A';
-                if (!grouping[cond]) {
-                    grouping[cond] = { raizAcumulada: 0, talloAcumulado: 0, count: 0 };
-                }
-                grouping[cond].raizAcumulada += parseFloat(item.longitud_raiz || 0);
-                grouping[cond].talloAcumulado += parseFloat(item.longitud_tallo || 0);
-                grouping[cond].count += 1;
-            });
-            const labels = Object.keys(grouping);
-            const roots = labels.map(l => (grouping[l].raizAcumulada / grouping[l].count).toFixed(2));
-            const stems = labels.map(l => (grouping[l].talloAcumulado / grouping[l].count).toFixed(2));
-            if (chartInstance) {
-                chartInstance.destroy();
-            }
-            const ctx = document.getElementById('graficoBiometria').getContext('2d');
-
-            // Create gradients for the chart
-            const rootGradient = ctx.createLinearGradient(0, 0, 0, 300);
-            rootGradient.addColorStop(0, 'rgba(16, 185, 129, 0.8)');
-            rootGradient.addColorStop(1, 'rgba(16, 185, 129, 0.1)');
-            const stemGradient = ctx.createLinearGradient(0, 0, 0, 300);
-            stemGradient.addColorStop(0, 'rgba(99, 102, 241, 0.8)');
-            stemGradient.addColorStop(1, 'rgba(99, 102, 241, 0.1)');
-            chartInstance = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Media Raíz (mm)',
-                            data: roots,
-                            backgroundColor: rootGradient,
-                            borderColor: '#10b981',
-                            borderWidth: 2,
-                            borderRadius: 6,
-                            borderSkipped: false
-                        },
-                        {
-                            label: 'Media Tallo (mm)',
-                            data: stems,
-                            backgroundColor: stemGradient,
-                            borderColor: '#6366f1',
-                            borderWidth: 2,
-                            borderRadius: 6,
-                            borderSkipped: false
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            labels: {
-                                color: '#94a3b8',
-                                font: {
-                                    family: 'Outfit',
-                                    size: 12
-                                }
-                            }
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                            titleFont: { family: 'Outfit', size: 13, weight: 'bold' },
-                            bodyFont: { family: 'Outfit', size: 12 },
-                            borderColor: 'rgba(255,255,255,0.1)',
-                            borderWidth: 1,
-                            padding: 12,
-                            cornerRadius: 8
-                        }
-                    },
-                    scales: {
-                        y: {
-                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                            ticks: { color: '#94a3b8', font: { family: 'Outfit' } },
-                            title: { display: true, text: 'Milímetros (mm)', color: '#94a3b8', font: { family: 'Outfit' } }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#94a3b8', font: { family: 'Outfit' } },
-                            title: { display: true, text: 'Tratamientos', color: '#94a3b8', font: { family: 'Outfit' } }
-                        }
-                    }
-                }
-            });
-        }
         // Prevent XSS
         function escapeHtml(unsafe) {
             return (unsafe || '')
@@ -407,44 +388,240 @@
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
         }
+
         // Register event listeners
         searchInput.addEventListener('input', renderDashboard);
         seedFilter.addEventListener('change', renderDashboard);
         statusFilter.addEventListener('change', renderDashboard);
-        // Intercept form submission if in local mock mode to simulate database adding
-        mainForm.addEventListener('submit', function (e) {
-            if (isLocalMode) {
-                e.preventDefault();
 
-                const newRecord = {
-                    nombre_lote: document.getElementById('nombre_lote').value,
-                    tipo_semilla: document.getElementById('tipo_semilla').value,
-                    num_muestra: parseInt(document.getElementById('num_muestra').value, 10),
-                    condicion_tratamiento: document.getElementById('condicion_tratamiento').value,
-                    longitud_raiz: parseFloat(document.getElementById('longitud_raiz').value),
-                    longitud_tallo: parseFloat(document.getElementById('longitud_tallo').value),
-                    germino: parseInt(document.getElementById('germino').value, 10)
-                };
-                originalData.push(newRecord);
-                renderDashboard();
+        // Initialize Capture Table (27 rows)
+        const captureTableBody = document.getElementById('capture-table-body');
+        function initCaptureTable() {
+            captureTableBody.innerHTML = '';
+            for (let i = 1; i <= 27; i++) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="cell-no">${i}</td>
+                    <td class="cell-input">
+                        <input type="number" step="0.01" min="0" value="0.00" class="table-input-control input-raiz" data-index="${i}">
+                    </td>
+                    <td class="cell-input">
+                        <input type="number" step="0.01" min="0" value="0.00" class="table-input-control input-tallo" data-index="${i}">
+                    </td>
+                    <td class="cell-status" id="status-${i}">
+                        <span class="badge badge-inactive"><i class="fa-solid fa-circle-xmark"></i> No germinó</span>
+                    </td>
+                `;
+                captureTableBody.appendChild(tr);
+            }
+        }
 
-                // Clear the form fields (except defaults)
-                mainForm.reset();
-                document.getElementById('num_muestra').value = 1;
-                document.getElementById('longitud_raiz').value = "0.00";
-                document.getElementById('longitud_tallo').value = "0.00";
-                // Visual response indicating success
-                const btn = document.getElementById('btn-submit');
-                const origHtml = btn.innerHTML;
-                btn.innerHTML = '<i class="fa-solid fa-check"></i> ¡Indexado con éxito!';
-                btn.style.background = '#059669';
-                setTimeout(() => {
-                    btn.innerHTML = origHtml;
-                    btn.style.background = '';
-                }, 2000);
+        // Update germination status reactively
+        function updateRowStatus(index) {
+            const row = captureTableBody.querySelector(`tr:nth-child(${index})`);
+            if (!row) return;
+            const raizVal = parseFloat(row.querySelector('.input-raiz').value) || 0;
+            const talloVal = parseFloat(row.querySelector('.input-tallo').value) || 0;
+            const statusCell = document.getElementById(`status-${index}`);
+            
+            if (raizVal > 0.01 && talloVal > 0.01) {
+                statusCell.innerHTML = `<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> Germinó</span>`;
+            } else {
+                statusCell.innerHTML = `<span class="badge badge-inactive"><i class="fa-solid fa-circle-xmark"></i> No germinó</span>`;
+            }
+        }
+
+        captureTableBody.addEventListener('input', function (e) {
+            if (e.target.classList.contains('input-raiz') || e.target.classList.contains('input-tallo')) {
+                const index = e.target.getAttribute('data-index');
+                updateRowStatus(index);
             }
         });
+
+        // Initialize Fecha de Registro with current local date/time
+        function initFechaRegistro() {
+            const dateInput = document.getElementById('fecha_registro');
+            if (dateInput) {
+                const now = new Date();
+                const offset = now.getTimezoneOffset() * 60000;
+                const localISOTime = (new Date(now - offset)).toISOString().slice(0, 16);
+                dateInput.value = localISOTime;
+            }
+        }
+
+        // Batch save handler
+        const saveBatchBtn = document.getElementById('btn-save-batch');
+        if (saveBatchBtn) {
+            saveBatchBtn.addEventListener('click', function () {
+                const nombreLote = document.getElementById('nombre_lote').value.trim();
+                const tipoSemilla = document.getElementById('tipo_semilla').value;
+                const fechaRegistro = document.getElementById('fecha_registro').value;
+                const tiempoTratamiento = document.getElementById('tiempo_tratamiento').value.trim();
+
+                if (!nombreLote || !fechaRegistro || !tiempoTratamiento) {
+                    alert("Por favor, complete todos los campos generales obligatorios (Lote, Variedad, Fecha, Tiempo de Tratamiento).");
+                    return;
+                }
+
+                const mediciones = [];
+                for (let i = 1; i <= 27; i++) {
+                    const row = captureTableBody.querySelector(`tr:nth-child(${i})`);
+                    if (!row) continue;
+                    const raizVal = parseFloat(row.querySelector('.input-raiz').value) || 0;
+                    const talloVal = parseFloat(row.querySelector('.input-tallo').value) || 0;
+                    const germinoVal = (raizVal > 0.01 && talloVal > 0.01) ? 1 : 0;
+                    
+                    mediciones.push({
+                        num_muestra: i,
+                        longitud_raiz: raizVal,
+                        longitud_tallo: talloVal,
+                        germino: germinoVal
+                    });
+                }
+
+                const payload = {
+                    nombre_lote: nombreLote,
+                    tipo_semilla: tipoSemilla,
+                    fecha_registro: fechaRegistro,
+                    tiempo_tratamiento: tiempoTratamiento,
+                    mediciones: mediciones
+                };
+
+                if (isLocalMode) {
+                    // Simulate local save
+                    mediciones.forEach(med => {
+                        originalData.unshift({
+                            nombre_lote: nombreLote,
+                            tipo_semilla: tipoSemilla,
+                            num_muestra: med.num_muestra,
+                            condicion_tratamiento: tiempoTratamiento,
+                            longitud_raiz: med.longitud_raiz,
+                            longitud_tallo: med.longitud_tallo,
+                            germino: med.germino
+                        });
+                    });
+                    
+                    renderDashboard();
+                    
+                    // Reset table inputs
+                    for (let i = 1; i <= 27; i++) {
+                        const row = captureTableBody.querySelector(`tr:nth-child(${i})`);
+                        if (row) {
+                            row.querySelector('.input-raiz').value = "0.00";
+                            row.querySelector('.input-tallo').value = "0.00";
+                            updateRowStatus(i);
+                        }
+                    }
+
+                    // Reset form general fields (keep date current)
+                    document.getElementById('nombre_lote').value = '';
+                    document.getElementById('tiempo_tratamiento').value = '';
+                    initFechaRegistro();
+
+                    // Visual feedback
+                    const origHtml = saveBatchBtn.innerHTML;
+                    saveBatchBtn.innerHTML = '<i class="fa-solid fa-check"></i> ¡Lote guardado con éxito (Demo)!';
+                    saveBatchBtn.style.background = '#059669';
+                    setTimeout(() => {
+                        saveBatchBtn.innerHTML = origHtml;
+                        saveBatchBtn.style.background = '';
+                    }, 2500);
+
+                } else {
+                    // Production Server: Save via Fetch POST JSON
+                    saveBatchBtn.disabled = true;
+                    const origHtml = saveBatchBtn.innerHTML;
+                    saveBatchBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando Lote...';
+
+                    fetch('/guardar_lote', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(response => response.json())
+                    .then(res => {
+                        saveBatchBtn.disabled = false;
+                        saveBatchBtn.innerHTML = origHtml;
+                        if (res.success) {
+                            // Reload to get database rows
+                            window.location.reload();
+                        } else {
+                            alert("Error al guardar: " + (res.error || "Ocurrió un error inesperado."));
+                        }
+                    })
+                    .catch(err => {
+                        saveBatchBtn.disabled = false;
+                        saveBatchBtn.innerHTML = origHtml;
+                        console.error(err);
+                        alert("Error de red: No se pudo conectar con el servidor.");
+                    });
+                }
+            });
+        }
+
+        // Keyboard navigation and auto-selection for sample registration table
+        captureTableBody.addEventListener('keydown', function (e) {
+            const target = e.target;
+            if (!target.classList.contains('table-input-control')) return;
+
+            const isRaiz = target.classList.contains('input-raiz');
+            const isTallo = target.classList.contains('input-tallo');
+            const currentIndex = parseInt(target.getAttribute('data-index'), 10);
+            const totalRows = captureTableBody.children.length;
+
+            let nextInput = null;
+
+            switch (e.key) {
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (currentIndex > 1) {
+                        const nextIndex = currentIndex - 1;
+                        const selector = isRaiz ? `.input-raiz[data-index="${nextIndex}"]` : `.input-tallo[data-index="${nextIndex}"]`;
+                        nextInput = captureTableBody.querySelector(selector);
+                    }
+                    break;
+                case 'ArrowDown':
+                case 'Enter':
+                    e.preventDefault();
+                    if (currentIndex < totalRows) {
+                        const nextIndex = currentIndex + 1;
+                        const selector = isRaiz ? `.input-raiz[data-index="${nextIndex}"]` : `.input-tallo[data-index="${nextIndex}"]`;
+                        nextInput = captureTableBody.querySelector(selector);
+                    }
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    if (isTallo) {
+                        nextInput = captureTableBody.querySelector(`.input-raiz[data-index="${currentIndex}"]`);
+                    }
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    if (isRaiz) {
+                        nextInput = captureTableBody.querySelector(`.input-tallo[data-index="${currentIndex}"]`);
+                    }
+                    break;
+            }
+
+            if (nextInput) {
+                nextInput.focus();
+            }
+        });
+
+        // Auto-select text on focus
+        captureTableBody.addEventListener('focusin', function (e) {
+            if (e.target.classList.contains('table-input-control')) {
+                setTimeout(() => {
+                    e.target.select();
+                }, 0);
+            }
+        });
+
         // Initialize App on load
+        initCaptureTable();
+        initFechaRegistro();
         renderDashboard();
     </script>
 </body>
