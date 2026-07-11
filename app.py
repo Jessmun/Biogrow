@@ -1,5 +1,5 @@
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 app = Flask(__name__, static_folder='styles', static_url_path='/styles')
 DATABASE = "experimentos.db"
@@ -127,6 +127,66 @@ def insertar_muestra():
     conn.close()
 
     return redirect(url_for("index"))
+
+
+@app.route("/guardar_lote", methods=["POST"])
+def guardar_lote():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No se recibieron datos"}), 400
+
+    nombre_lote = data.get("nombre_lote")
+    tipo_semilla = data.get("tipo_semilla")
+    fecha_registro = data.get("fecha_registro")
+    tiempo_tratamiento = data.get("tiempo_tratamiento")
+    mediciones = data.get("mediciones", [])
+
+    if not nombre_lote or not tipo_semilla or not tiempo_tratamiento:
+        return jsonify({"error": "Faltan campos generales obligatorios (Lote, Variedad, Tiempo de Tratamiento)"}), 400
+
+    if not mediciones or len(mediciones) == 0:
+        return jsonify({"error": "No se enviaron mediciones de semillas"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        if fecha_registro:
+            # Reemplazar T con un espacio para compatibilidad con formato estándar de fecha/hora de SQLite
+            fecha_registro_cleaned = fecha_registro.replace('T', ' ')
+            cursor.execute("""
+                INSERT INTO experimentos (nombre_experimento, tipo_semilla, fecha_registro)
+                VALUES (?, ?, ?)
+            """, (nombre_lote, tipo_semilla, fecha_registro_cleaned))
+        else:
+            cursor.execute("""
+                INSERT INTO experimentos (nombre_experimento, tipo_semilla)
+                VALUES (?, ?)
+            """, (nombre_lote, tipo_semilla))
+
+        experimento_id = cursor.lastrowid
+
+        for med in mediciones:
+            num_muestra = int(med.get("num_muestra"))
+            raiz = float(med.get("longitud_raiz", 0.0))
+            tallo = float(med.get("longitud_tallo", 0.0))
+            # Regla de germinación en backend por consistencia
+            germino = 1 if (raiz > 0.01 and tallo > 0.01) else 0
+
+            cursor.execute("""
+                INSERT INTO mediciones_semillas (
+                    experimento_id, num_muestra, condicion_tratamiento, longitud_raiz, longitud_tallo, germino
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (experimento_id, num_muestra, tiempo_tratamiento, raiz, tallo, germino))
+
+        conn.commit()
+        return jsonify({"success": True, "message": "Lote y mediciones guardadas correctamente"})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
