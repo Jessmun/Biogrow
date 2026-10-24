@@ -383,6 +383,7 @@ def _extraer_bloques_de_hoja(nombre_hoja, celdas, advertencias):
 TIPO_TIEMPO = "Tiempo de tratamiento por fecha (Blanco / Rosa)"
 TIPO_TIEMPO30 = "Tiempo 30 s por variedad (Cacahuazintle / Criollo)"
 TIPO_TEMPERATURA = "Temperatura del tratamiento (Criollo)"
+TIPO_COLUMNAS = "Temperatura: un tratamiento por columna (Raíz / Tallo)"
 
 CONFIG_TIPO = {
     TIPO_TIEMPO: {
@@ -404,7 +405,7 @@ CONFIG_TIPO = {
         "descripcion": (
             "Todas las semillas tratadas recibieron 30 s. Se compara la cara expuesta "
             "(**Embrión / Endospermo**) contra el **Control** y entre variedades. Los "
-            "'Experimento 1, 2, 3' son las cajas (réplicas). Longitudes en mm."
+            "'Experimento 1, 2, 3' son las cajas (réplicas). Longitudes en el Excel en mm; se muestran en cm."
         ),
         "pregunta": "¿Importa qué cara de la semilla se expone? ¿Responde igual cada variedad?",
     },
@@ -414,10 +415,20 @@ CONFIG_TIPO = {
         "descripcion": (
             "Nomenclatura **'Mx - Txx'**: x = número de muestra (caja), xx = temperatura del "
             "tratamiento (Tamb = ambiente). T-01…T-05 = **patrón sin tratamiento**. Las "
-            "longitudes vienen en **cm** y se convierten a **mm** para que sean comparables "
+            "longitudes vienen en **cm** y se respetan; los archivos en mm se pasan a **cm** para que sean comparables "
             "con los demás archivos. Los bloques de plantilla vacíos se descartan."
         ),
         "pregunta": "¿Qué temperatura durante el tratamiento favorece la germinación y el crecimiento?",
+    },
+    TIPO_COLUMNAS: {
+        "dims": ["Temperatura", "Bloque", "Archivo"],
+        "default": ["Temperatura"],
+        "descripcion": (
+            "Hojas **'Raíz'** y **'Tallo'** con un tratamiento por columna (**T-01** = control sin "
+            "tratamiento; **Mx - temperatura**, p. ej. M2-Amb, M4-35 °C) y una semilla por fila. "
+            "Las longitudes se respetan en **cm**. Como no hay cajas, cada dato es una semilla."
+        ),
+        "pregunta": "¿Qué temperatura del tratamiento da raíces o tallos más largos que el control (T-01)?",
     },
 }
 
@@ -435,10 +446,11 @@ def _es_formato_temperatura(celdas):
 
 
 def _unidad_longitud(celdas):
-    """Detecta la nota 'Longitud dada en cm'. Devuelve el factor para pasar a mm."""
+    """Detecta la nota 'Longitud dada en cm'. Los valores se leen tal cual (factor 1);
+    la conversión de mm a cm se hace después, en _postprocesar."""
     for (fila, _c), valor in celdas.items():
         if fila <= 3 and isinstance(valor, str) and re.search(r"\bcm\b", valor, re.IGNORECASE):
-            return 10.0, "cm"
+            return 1.0, "cm"
     return 1.0, "mm"
 
 
@@ -573,6 +585,94 @@ def _extraer_hoja_temperatura(nombre_hoja, celdas, advertencias, nombre_archivo=
     return registros
 
 
+def _variable_de_hoja(nombre_hoja):
+    t = nombre_hoja.strip().lower()
+    if re.search(r"ra[ií]z|radic", t):
+        return "Raíz"
+    if re.search(r"tallo|hipoc|vástago|vastago", t):
+        return "Tallo"
+    return None
+
+
+def _es_formato_columnas(celdas):
+    """Hoja 'ancha': la primera fila con texto trae un tratamiento por columna (T-01, M2-Amb,
+    M3-22…) y debajo solo hay números, una semilla por fila. Sin columnas No/Germinó."""
+    if not celdas:
+        return False
+    fila_enc = min(f for f, _ in celdas)
+    encabezados = {c: v for (f, c), v in celdas.items() if f == fila_enc}
+    if len(encabezados) < 2 or not all(isinstance(v, str) and v.strip() for v in encabezados.values()):
+        return False
+    resto = [(f, c, v) for (f, c), v in celdas.items() if f > fila_enc]
+    if any(isinstance(v, str) and v.strip() for _f, _c, v in resto):
+        return False
+    numeros = [(c, v) for _f, c, v in resto if isinstance(v, (int, float))]
+    return len(numeros) >= 5 and all(c in encabezados for c, _ in numeros)
+
+
+def _tratamiento_de_columna(texto, segundos):
+    """T-01 → control; 'M2-Amb' / 'M2-ambiente' → muestra 2 a temperatura ambiente;
+    'M4-35°C' → muestra 4 a 35 °C. Devuelve (bloque, clase, nombre_clase, temp_lbl, temp_num, seg, tirada)."""
+    m = PATRON_TITULO.match(texto)
+    if m:
+        return (f"T-{int(m.group(2)):02d}", "S", "Patrón", "Control", np.nan, 0, 0)
+    m = PATRON_MUESTRA.match(texto)
+    if m:
+        n, temp = int(m.group(1)), m.group(2).lower()
+        if temp.startswith("amb"):
+            lbl, num, corto = "Ambiente", np.nan, "Amb"
+        else:
+            num = float(temp.replace(",", "."))
+            lbl, corto = f"{num:g} °C", f"{num:g} °C"
+        return (f"M{n} - {corto}", "T", "Tratada", lbl, num, segundos, n)
+    limpio = re.sub(r"\s+", " ", texto.strip())
+    if _es_control(limpio):
+        return (limpio, "S", "Patrón", "Control", np.nan, 0, 0)
+    return (limpio, "T", "Tratada", limpio, np.nan, segundos, 0)
+
+
+def _extraer_hoja_columnas(nombre_hoja, celdas, advertencias, nombre_archivo=""):
+    variable = _variable_de_hoja(nombre_hoja)
+    if variable is None:
+        advertencias.append(
+            f"Hoja '{nombre_hoja}': tiene un tratamiento por columna, pero por su nombre no se sabe si "
+            "mide raíz o tallo. Renómbrala 'Raíz' o 'Tallo' para que se analice.")
+        return []
+    nota_mm = any(isinstance(v, str) and re.search(r"\bmm\b", v, re.IGNORECASE)
+                  for v in list(celdas.values()) + [nombre_hoja])
+    unidad = "mm" if nota_mm else "cm"
+    segundos, fuente_seg = _tiempo_temperatura(celdas, nombre_archivo, [])
+    etiqueta_hoja = _etiqueta_desde_archivo(nombre_archivo, Path(nombre_archivo or nombre_hoja).stem)
+    color = _color_de_hoja(nombre_archivo or "")
+    fila_enc = min(f for f, _ in celdas)
+    registros = []
+    for (f, col), texto in sorted(celdas.items()):
+        if f != fila_enc:
+            continue
+        bloque, codigo, nombre_clase, temp_lbl, temp_num, seg, tirada = _tratamiento_de_columna(texto, segundos)
+        valores = [(fila, celdas[(fila, col)]) for fila in sorted(ff for ff, cc in celdas if cc == col and ff > fila_enc)
+                   if isinstance(celdas[(fila, col)], (int, float))]
+        if not valores:
+            advertencias.append(f"Hoja '{nombre_hoja}', columna {texto}: sin datos.")
+            continue
+        for n, (_fila, valor) in enumerate(valores, start=1):
+            registros.append({
+                "Hoja": etiqueta_hoja, "Fecha etiqueta": etiqueta_hoja, "Día": None, "Mes": None,
+                "Color": color, "Tirada": tirada, "Paridad": "Par" if tirada % 2 == 0 else "Impar",
+                "Clase": codigo, "Clase nombre": nombre_clase, "Bloque": bloque, "Réplica": 1,
+                "No": n, "Raíz": float(valor) if variable == "Raíz" else None,
+                "Tallo": float(valor) if variable == "Tallo" else None, "Germinó": 1,
+                "Tratamiento (s)": seg, "Condición": "Estándar",
+                "Temperatura": temp_lbl, "Temperatura (°C)": temp_num, "Unidad original": unidad,
+                "Fuente del tiempo": ("Control: sin tratamiento (0 s)" if seg == 0 else fuente_seg),
+            })
+    advertencias.append(
+        f"Hoja '{nombre_hoja}' ({variable}): un tratamiento por columna y una semilla por fila; "
+        f"se leyeron {len(registros)} semillas. Longitudes tomadas en {unidad}"
+        + (" (sin nota de unidad en la hoja)" if unidad == "cm" else " y pasadas a cm") + ".")
+    return registros
+
+
 def _leer_libro(fuente):
     """Devuelve [(nombre_hoja, celdas)] desde una ruta o bytes de un .xlsx."""
     if isinstance(fuente, (bytes, bytearray)):
@@ -594,7 +694,10 @@ def cargar_datos(fuente, nombre_archivo=None):
     for nombre_hoja, celdas in _leer_libro(fuente):
         if not celdas:
             continue
-        if _es_formato_temperatura(celdas):
+        if _es_formato_columnas(celdas):
+            tipo = TIPO_COLUMNAS
+            registros = _extraer_hoja_columnas(nombre_hoja, celdas, advertencias, nombre_archivo)
+        elif _es_formato_temperatura(celdas):
             tipo = TIPO_TEMPERATURA
             registros = _extraer_hoja_temperatura(nombre_hoja, celdas, advertencias, nombre_archivo)
         elif _es_formato_tiempo(celdas):
@@ -633,6 +736,11 @@ def _postprocesar(df):
         df[col] = df[col].fillna(defecto)
     if "Temperatura (°C)" not in df.columns:
         df["Temperatura (°C)"] = np.nan
+
+    # Todas las longitudes se trabajan en cm: lo medido en cm se respeta tal cual
+    # y lo medido en mm se divide entre 10.
+    en_mm = df["Unidad original"] == "mm"
+    df.loc[en_mm, ["Raíz", "Tallo"]] = (df.loc[en_mm, ["Raíz", "Tallo"]] / 10).round(4)
 
     # Coherencia: si hay longitud > 0 la semilla germinó.
     creció = (df["Raíz"].fillna(0) > 0) | (df["Tallo"].fillna(0) > 0)
@@ -1889,7 +1997,7 @@ def comparacion_corridas(df, variable, columna_grupo, dispersion="Desviación es
 
     fig.update_layout(
         xaxis_title="Caja (bloque, réplica" + (" y fecha)" if varias_hojas else ")"),
-        yaxis_title=("Germinación (proporción 0–1)" if variable == "Germinó" else f"{variable} (mm)")
+        yaxis_title=("Germinación (proporción 0–1)" if variable == "Germinó" else f"{variable} (cm)")
         + f" · media ± {'SEM' if col_err == 'SEM' else 'DE'}",
         height=560,
         legend_title=(etiqueta_eje or "Grupo de comparación"),
@@ -1996,7 +2104,7 @@ def raiz_vs_tallo(df, columna_grupo, dispersion="Desviación estándar",
             if not mostrar_valores or pd.isna(fila["Media"]):
                 textos.append("")
                 continue
-            textos.append(f"{fila['Media']:.1f}")
+            textos.append(f"{fila['Media']:.2f}")
 
         disp_hover = (datos[col_txt] if col_txt is not None else (datos["Q3"] - datos["Q1"])).fillna(0)
         fig.add_trace(go.Bar(
@@ -2006,9 +2114,9 @@ def raiz_vs_tallo(df, columna_grupo, dispersion="Desviación estándar",
                          arrayminus=err_menos if err_menos is not None else None,
                          visible=True, color="rgba(150,150,150,0.9)", thickness=1.3, width=4),
             customdata=np.stack([datos["n"].fillna(0), disp_hover], axis=1),
-            hovertemplate=(f"<b>%{{x}}</b><br>{variable}: %{{y:.2f}} mm<br>"
+            hovertemplate=(f"<b>%{{x}}</b><br>{variable}: %{{y:.2f}} cm<br>"
                            f"{'IQR' if col_txt is None else ('SEM' if col_txt == 'SEM' else 'DE')}: "
-                           "%{customdata[1]:.2f} mm<br>n = %{customdata[0]}<extra></extra>"),
+                           "%{customdata[1]:.2f} cm<br>n = %{customdata[0]}<extra></extra>"),
         ))
 
     etiqueta_disp = {
@@ -2023,7 +2131,7 @@ def raiz_vs_tallo(df, columna_grupo, dispersion="Desviación estándar",
     fig.update_layout(
         title=titulo, barmode="group",
         xaxis_title=etiqueta_eje or columna_grupo,
-        yaxis_title="Media (mm)",
+        yaxis_title="Media (cm)",
         xaxis=dict(type="category", tickangle=-30, automargin=True),
         legend_title="Medición", margin=dict(t=90),
     )
@@ -2237,7 +2345,7 @@ def aplicar_descartes(df, variable, op):
         rango = op.get("rango")
         if rango:
             m = d[variable].notna() & ((d[variable] < rango[0]) | (d[variable] > rango[1]))
-            anotar(m, f"Fuera del rango {rango[0]}–{rango[1]} mm", False)
+            anotar(m, f"Fuera del rango {rango[0]:g}–{rango[1]:g} cm", False)
             d.loc[m, variable] = np.nan
 
         if op.get("atipicos"):
@@ -2272,7 +2380,7 @@ def tabla_correcciones(op, variable, hojas_cm, manuales, registro, df_semilla, a
         n_s = sum(int(re.search(r"Hay (\d+)", a).group(1)) for a in sueltas if re.search(r"Hay (\d+)", a))
         filas.append(("Columnas sueltas 'R'/'T' sin número ni 'Germinó'", "Sí, siempre",
                       "No se pueden asignar a una caja; no se incluyen.", f"{n_s} valor(es)"))
-    filas.append(("Hojas medidas en cm (convertir a mm)", "Sí: " + ", ".join(hojas_cm) if hojas_cm else "No",
+    filas.append(("Hojas que ya estaban en cm sin indicarlo (no dividir entre 10)", "Sí: " + ", ".join(hojas_cm) if hojas_cm else "No",
                   "Multiplica por 10 las longitudes de esas hojas.", "—"))
     n = cuenta("Caja vacía")
     filas.append(("Excluir cajas vacías (no realizadas)", "Sí" if op.get("cajas_vacias") else "No",
@@ -2287,13 +2395,13 @@ def tabla_correcciones(op, variable, hojas_cm, manuales, registro, df_semilla, a
         else:
             n_ng = int((df_semilla["Germinó"] == 0).sum())
             filas.append(("Semillas que no germinaron", "Incluidas con longitud 0",
-                          f"Entran al promedio de {v} con 0 mm.", f"{n_ng} semilla(s)"))
+                          f"Entran al promedio de {v} con 0 cm.", f"{n_ng} semilla(s)"))
         filas.append((f"Excluir germinadas con {v} = 0", "Sí" if op.get("ceros_germinadas") else "No",
                       f"Germinadas con {v} = 0 salen del promedio"
                       + ("; en el % de germinación cuentan como no germinadas." if variable == "Raíz" else "."),
                       f"{cuenta('Germinó pero')} semilla(s)"))
         r = op.get("rango")
-        filas.append(("Excluir valores fuera de un rango", f"Sí: {r[0]}–{r[1]} mm" if r else "No",
+        filas.append(("Excluir valores fuera de un rango", f"Sí: {r[0]:g}–{r[1]:g} cm" if r else "No",
                       f"Valores de {v} fuera del rango salen del promedio.", f"{cuenta('Fuera del rango')} valor(es)"))
         filas.append(("Excluir valores atípicos de cada grupo",
                       f"Sí: regla {op.get('factor_iqr', 1.5):g} × IQR" if op.get("atipicos") else "No",
@@ -2332,10 +2440,10 @@ def revisar_calidad(df):
     # hojas que parecen medidas en cm sin indicarlo
     for hoja, sub in df[df["Unidad original"] == "mm"].groupby("Hoja"):
         g = sub[sub["Germinó"] == 1]
-        if len(g) > 20 and g["Raíz"].quantile(0.9) < 30 and g["Tallo"].quantile(0.9) < 30:
+        if len(g) > 20 and g["Raíz"].quantile(0.9) < 3 and g["Tallo"].quantile(0.9) < 3:
             avisos.append(f"{hoja}: las longitudes parecen estar en cm (90 % de las raíces "
-                          f"< {g['Raíz'].quantile(0.9):.1f}) y la hoja no lo indica. Si es así, "
-                          "márcala en '5 · Descartes y correcciones → Hojas medidas en cm'.")
+                          f"< {g['Raíz'].quantile(0.9) * 10:.1f} en la hoja) y la hoja no lo indica. Si es así, "
+                          "márcala en '5 · Descartes y correcciones → Hojas que ya estaban en cm'.")
     return avisos
 
 
@@ -2343,7 +2451,7 @@ def hojas_probables_cm(df):
     salida = []
     for hoja, sub in df[df["Unidad original"] == "mm"].groupby("Hoja"):
         g = sub[sub["Germinó"] == 1]
-        if len(g) > 20 and g["Raíz"].quantile(0.9) < 30 and g["Tallo"].quantile(0.9) < 30:
+        if len(g) > 20 and g["Raíz"].quantile(0.9) < 3 and g["Tallo"].quantile(0.9) < 3:
             salida.append(hoja)
     return salida
 
@@ -2462,7 +2570,7 @@ def _es_control(nombre):
 def _unidades(variable):
     if variable == "Germinó":
         return "%", "%²", "Germinación"
-    return "mm", "mm²", variable
+    return "cm", "cm²", variable
 
 
 def columna_germinacion(df):
@@ -2543,7 +2651,7 @@ def tabla_anova_clara(anova, u2):
 
 
 def pares_significativos(tk, u):
-    """Frases tipo 'A (47.2 mm) > B (34.3 mm)' para los pares que difieren."""
+    """Frases tipo 'A (4.72 cm) > B (3.43 cm)' para los pares que difieren."""
     frases = []
     for _, f in tk[tk["Resultado"] == SIG].iterrows():
         a, b, ma, mb = f["Grupo 1"], f["Grupo 2"], f["Media 1"], f["Media 2"]
@@ -2723,7 +2831,7 @@ def grafico_barras_grupos_letras(desc, letras, variable, u, eje_x, titulo, subti
     paleta = paleta_aleatoria(len(combos))
     color_combo = {c: paleta[i % len(paleta)] for i, c in enumerate(combos)}
     de = d["Desviación estándar"].fillna(0)
-    etiquetas = {g: f"<b>{g}</b><br>{m:.1f} {u}" for g, m in zip(d["Grupo"], d["Media"])}
+    etiquetas = {g: f"<b>{g}</b><br>{m:.2f} {u}" for g, m in zip(d["Grupo"], d["Media"])}
     fig = go.Figure()
     for combo in combos:
         sub = d[d["Letras"] == combo]
@@ -3003,7 +3111,7 @@ def grafico_dispersion_grupos(datos, variable, u, eje_x, titulo, subtitulo="", e
     fig.update_layout(
         title=f"<b>{titulo}</b><br><sub>{sub_txt}</sub>",
         xaxis=dict(title=eje_x, tickmode="array", tickvals=list(range(len(grupos))),
-                   ticktext=[f"{g}<br><span style='font-size:0.85em'>DE {0 if pd.isna(resumen.loc[g, 'std']) else resumen.loc[g, 'std']:.1f} · n {int(resumen.loc[g, 'count'])}</span>"
+                   ticktext=[f"{g}<br><span style='font-size:0.85em'>DE {0 if pd.isna(resumen.loc[g, 'std']) else resumen.loc[g, 'std']:.2f} · n {int(resumen.loc[g, 'count'])}</span>"
                              for g in grupos], tickangle=0, range=[-0.6, len(grupos) - 0.4],
                    showgrid=False, zeroline=False),
         yaxis=dict(title=f"{nombre} ({u})", gridcolor="rgba(128,128,128,0.18)", zeroline=False),
@@ -3071,7 +3179,7 @@ def grafico_barras_pares(tabla_pares, u, titulo, subtitulo="", escala=1.0,
     d = pd.DataFrame(filas).sort_values("Dif", ascending=True).reset_index(drop=True)
     verde, gris = "#1baf7a", "#8a8984"
     colores = [verde if sg else gris for sg in d["Sig"]]
-    textos = [f"{x:.1f} {u}  {'> ' if sg else '≤ '}{m:.1f}  →  {'sí difieren' if sg else 'no difieren'}"
+    textos = [f"{x:.2f} {u}  {'> ' if sg else '≤ '}{m:.2f}  →  {'sí difieren' if sg else 'no difieren'}"
               for x, m, sg in zip(d["Dif"], d["Margen"], d["Sig"])]
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -3125,7 +3233,7 @@ def correlacion_raiz_tallo(df, columna_grupo, semilla_color=0, subtitulo_filtros
     fig.update_traces(line=dict(width=3), opacity=1, selector=dict(mode="lines"))
     fig.update_traces(line=dict(width=2), selector=dict(mode="lines"))
     fig.update_layout(
-        xaxis_title="Raíz (mm)", yaxis_title="Tallo (mm)",
+        xaxis_title="Raíz (cm)", yaxis_title="Tallo (cm)",
         legend_title=etiqueta_eje or columna_grupo, margin=dict(t=90),
     )
     return aplicar_tipografia(fig, escala_fuente)
@@ -3371,6 +3479,139 @@ def mostrar_html(html, alto=900):
 # Aplicación
 # ---------------------------------------------------------------------------
 
+def tab_caja_por_caja(df_filtrado, df_semilla, variable):
+    """Pestaña 'Caja por caja': todas las cajas de un archivo y el detalle de una o dos."""
+    st.subheader("Caja por caja")
+    es_germ = variable == "Germinó"
+    u = "%" if es_germ else "cm"
+    st.caption("Elige un archivo para ver todas sus cajas con sus semillas, y selecciona de una a cinco "
+               "para verlas a detalle o compararlas. Los valores ya tienen aplicados los descartes.")
+    archivos = sorted(df_filtrado["Archivo"].astype(str).unique())
+    if not archivos:
+        st.info("No hay cajas con la selección actual.")
+        return
+    archivo = st.selectbox("Archivo", archivos, key="cxc_archivo")
+    crudo = df_filtrado[df_filtrado["Archivo"].astype(str) == archivo].copy()
+    vacias = cajas_vacias(crudo)
+    if vacias and not st.checkbox(f"Mostrar también las {len(vacias)} cajas vacías (bloques de plantilla sin datos)",
+                                  key=f"cxc_vacias_{archivo}"):
+        crudo = crudo[~crudo["Corrida"].isin(vacias)]
+    analizado = df_semilla[df_semilla["Archivo"].astype(str) == archivo]
+    etiqueta = (crudo.drop_duplicates("Corrida").set_index("Corrida")
+                .apply(lambda f: f"{f['Bloque']} · rep {f['Réplica']} · {f['Hoja']}", axis=1).to_dict())
+    repetidas = pd.Series(etiqueta).duplicated(keep=False)
+    for caja in repetidas[repetidas].index:  # misma caja en dos variedades de una hoja
+        variedad = crudo.loc[crudo["Corrida"] == caja, "Variedad"].iloc[0]
+        etiqueta[caja] = f"{etiqueta[caja]} · {variedad}"
+    vistas = {}
+    for caja, texto in list(etiqueta.items()):
+        vistas[texto] = vistas.get(texto, 0) + 1
+        if vistas[texto] > 1:
+            etiqueta[caja] = f"{texto} ({vistas[texto]})"
+
+    filas = []
+    for caja in crudo["Corrida"].drop_duplicates():
+        c = crudo[crudo["Corrida"] == caja]
+        a = analizado[analizado["Corrida"] == caja]
+        v = pd.to_numeric(a[variable], errors="coerce").dropna()
+        if es_germ:
+            v = v * 100
+        germ = pd.to_numeric(c["Germinó"], errors="coerce")
+        filas.append({
+            "Caja": etiqueta.get(caja, caja), "Grupo": c["Grupo"].iloc[0], "Semillas": len(c),
+            "Germinaron": int((germ == 1).sum()), "% germinación": germ.mean() * 100 if len(germ) else np.nan,
+            "Semillas en el análisis": len(a) if es_germ else int(v.notna().sum()),
+            f"Promedio ({u})": v.mean() if len(v) else np.nan,
+            f"Desviación estándar ({u})": v.std(ddof=1) if (len(v) > 1 and not es_germ) else np.nan,
+            f"Varianza ({u}²)": v.var(ddof=1) if (len(v) > 1 and not es_germ) else np.nan,
+            "_id": caja})
+    tabla_cajas = pd.DataFrame(filas)
+    if es_germ:  # en germinación el dato de la caja es su %; DE y varianza salen entre cajas
+        tabla_cajas = tabla_cajas.drop(columns=[f"Promedio ({u})", f"Desviación estándar ({u})", f"Varianza ({u}²)"])
+
+    # Apartados: primero el patrón (sin tratamiento) y luego las corridas tratadas,
+    # separadas por la parte expuesta cuando el archivo la trae (Embrión / Endospermo).
+    info = crudo.drop_duplicates("Corrida").set_index("Corrida")
+    def apartado(caja):
+        f = info.loc[caja]
+        if str(f.get("Clase", "")) == "S" or _es_control(f.get("Grupo", "")):
+            return "Patrón (sin tratamiento)"
+        parte = str(f.get("Clase nombre", ""))
+        return f"Corridas · {parte}" if parte in ("Embrión", "Endospermo") else "Corridas (tratadas)"
+    orden_ap = {"Patrón (sin tratamiento)": 0, "Corridas · Embrión": 1, "Corridas · Endospermo": 2,
+                "Corridas (tratadas)": 3}
+    def orden_grupo(g):
+        m = re.search(r"\d+(?:\.\d+)?", str(g))
+        return (0, float(m.group()), str(g)) if m else (1, 0.0, str(g))
+    tabla_cajas["Apartado"] = tabla_cajas["_id"].map(apartado)
+    tabla_cajas["_o"] = list(zip(tabla_cajas["Apartado"].map(orden_ap),
+                                 tabla_cajas["Grupo"].map(orden_grupo), range(len(tabla_cajas))))
+    tabla_cajas = tabla_cajas.sort_values("_o").drop(columns="_o").reset_index(drop=True)
+    corto = {"Patrón (sin tratamiento)": "Patrón", "Corridas · Embrión": "Corrida · Embrión",
+             "Corridas · Endospermo": "Corrida · Endospermo", "Corridas (tratadas)": "Corrida"}
+    tabla_cajas["_sel"] = tabla_cajas["Apartado"].map(corto) + " · " + tabla_cajas["Caja"]
+
+    st.markdown(f"#### Cajas de {archivo} ({len(tabla_cajas)})")
+    for nombre_ap, sub in tabla_cajas.groupby("Apartado", sort=False):
+        st.markdown(f"**{nombre_ap}** · {len(sub)} caja{'s' if len(sub) != 1 else ''}")
+        _tabla(_fmt(sub.drop(columns=["_id", "_sel", "Apartado"])), height=min(420, 38 + 35 * len(sub)))
+
+    elegidas = st.multiselect("Elige de una a cinco cajas para verlas a detalle (pueden ser de distintos apartados)",
+                              tabla_cajas["_sel"].tolist(), max_selections=5, key=f"cxc_sel_{archivo}")
+    if not elegidas:
+        return
+    ids = tabla_cajas.set_index("_sel").loc[elegidas, "_id"].tolist()
+    # 1-2 cajas lado a lado; 3 o más en filas de 2 o 3 para que se lean bien
+    por_fila = 3 if len(ids) in (3, 5) else 2
+    columnas = []
+    for inicio in range(0, len(ids), por_fila):
+        columnas += list(st.columns(por_fila))[:len(ids[inicio:inicio + por_fila])]
+    colores = ["#2a78d6", "#e8823a", "#2e9e6a", "#8e5bb5", "#c43c3c"]
+    varias = len(ids) > 2
+    fig = go.Figure()
+    for k, (caja, col) in enumerate(zip(ids, columnas)):
+        c = crudo[crudo["Corrida"] == caja].copy()
+        a = analizado[analizado["Corrida"] == caja].set_index("ID semilla")
+        c["Valor en el análisis"] = c["ID semilla"].map(a[variable]) if variable in a else np.nan
+        if es_germ:
+            c["Entra al análisis"] = np.where(c["ID semilla"].isin(a.index), "Sí", "No (descartada)")
+        else:
+            c["Entra al análisis"] = np.where(c["Valor en el análisis"].notna(), "Sí", "No (descartada)")
+        fila = tabla_cajas[tabla_cajas["_id"] == caja].iloc[0]
+        with col:
+            st.markdown(f"**{elegidas[k]}** · {fila['Grupo']}")
+            m1, m2, m3 = st.columns(3)
+            prom = fila.get(f"Promedio ({u})", np.nan)
+            if not es_germ:
+                m1.metric(f"Promedio ({u})", "—" if pd.isna(prom) else f"{prom:.2f}")
+                de = fila[f"Desviación estándar ({u})"]
+                m2.metric(f"DE ({u})", "—" if pd.isna(de) else f"{de:.2f}")
+            else:
+                m1.metric("Germinaron", f"{fila['Germinaron']} de {fila['Semillas']}")
+            m3.metric("Germinación", f"{fila['% germinación']:.1f} %")
+            vista = c[["No", "Germinó", "Raíz", "Tallo", "Entra al análisis"]].rename(
+                columns={"No": "Semilla n.º", "Germinó": "Germinó (1 = sí)", "Raíz": "Raíz (cm)",
+                         "Tallo": "Tallo (cm)"})
+            _tabla(_fmt(vista, dec=2), height=min(420, 38 + 35 * len(vista)))
+        if not es_germ:
+            datos = c[c["Entra al análisis"] == "Sí"]
+            nombre = elegidas[k] + ("" if pd.isna(prom) or not varias else f" · prom. {prom:.2f} cm")
+            fig.add_trace(go.Bar(x=datos["No"], y=datos["Valor en el análisis"], name=nombre,
+                                 marker_color=colores[k], opacity=0.85,
+                                 hovertemplate="Semilla %{x}<br>%{y:.2f} cm<extra>" + elegidas[k] + "</extra>"))
+            if not pd.isna(prom):
+                fig.add_hline(y=prom, line=dict(color=colores[k], dash="dash", width=2),
+                              annotation_text="" if varias else f"Promedio {prom:.2f} cm",
+                              annotation_position="top left")
+    if not es_germ and fig.data:
+        fig.update_layout(barmode="group", title=f"{variable} de cada semilla (cm)",
+                          xaxis_title="Semilla n.º", yaxis_title=f"{variable} (cm)",
+                          legend=dict(orientation="h", y=-0.2))
+        _grafica(fig, f"cxc_{archivo}_{'_'.join(map(str, ids))}")
+        st.caption("Cada barra es una semilla que entra al análisis; la línea punteada es el promedio "
+                   "de la caja. Las semillas descartadas no aparecen.")
+
+
 def main():
     st.set_page_config(page_title="Dashboard de semillas · BioGrow", page_icon="🌱", layout="wide")
     _bloquear_traduccion_automatica()
@@ -3407,9 +3648,11 @@ def main():
                 "- **Tiempo de tratamiento por fecha:** hojas 'Datos-B/R (fecha)' con bloques "
                 "T-1M, T-1N… y controles T-01…T-05.\n"
                 "- **Tiempo 30 s por variedad:** bloques 'Experimento 1, 2, 3' con columnas "
-                "'Raíz [mm]' y 'Tallo [mm]'.\n"
+                "'Raíz [mm]' y 'Tallo [mm]' (se muestran en cm).\n"
                 "- **Temperatura del tratamiento:** bloques 'M1 - T35' (muestra 1 a 35 °C), "
-                "longitudes en cm.")
+                "longitudes en cm.\n"
+                "- **Un tratamiento por columna:** hojas 'Raíz' y 'Tallo' con columnas T-01 "
+                "(control), M2-Amb, M3-22, M4-35 °C… y una semilla por fila, en cm.")
         st.stop()
 
     df_todo, advertencias = _cargar(tuple(sorted(fuentes.items())))
@@ -3485,11 +3728,25 @@ def main():
 
     # ================================================================== 3. qué analizar
     st.sidebar.header("3 · Qué analizar")
+    es_columnas = df["Tipo de experimento"] == TIPO_COLUMNAS
+    solo_columnas = bool(es_columnas.all())
     variable = st.sidebar.selectbox(
-        "Variable", ["Raíz", "Tallo", "Germinó"],
-        format_func=lambda v: {"Raíz": "Longitud de raíz (mm)", "Tallo": "Longitud de tallo (mm)",
+        "Variable", ["Raíz", "Tallo"] if solo_columnas else ["Raíz", "Tallo", "Germinó"],
+        format_func=lambda v: {"Raíz": "Longitud de raíz (cm)", "Tallo": "Longitud de tallo (cm)",
                                "Germinó": "Germinación (%)"}[v])
     u, u2, nombre_var = _unidades(variable)
+    if es_columnas.any():
+        # En las hojas 'Raíz' y 'Tallo' cada fila es una medición de una sola variable:
+        # solo se usan las filas de la variable elegida.
+        if variable == "Germinó":
+            df = df[~es_columnas].copy()
+            st.sidebar.caption("Los archivos con un tratamiento por columna solo traen semillas "
+                               "germinadas medidas; no entran al % de germinación.")
+        else:
+            df = df[~es_columnas | df[variable].notna()].copy()
+        if df.empty:
+            st.warning(f"Los archivos elegidos no tienen datos de {variable.lower()}.")
+            st.stop()
 
     etiquetas = {
         "Temperatura": "Temperatura del tratamiento",
@@ -3515,11 +3772,15 @@ def main():
     unidad = st.sidebar.radio(
         "Cada dato del análisis es…",
         ["Una caja (promedio de sus semillas) — recomendado", "Una semilla"],
-        disabled=variable == "Germinó",
+        index=1 if solo_columnas else 0,
+        disabled=variable == "Germinó" or solo_columnas,
         help="Las semillas de una misma caja recibieron el tratamiento juntas, así que la "
         "réplica real es la caja. Con 'una semilla', los grados de libertad crecen mucho y "
         "las pruebas encuentran diferencias que no son reales.")
-    por_caja = True if variable == "Germinó" else unidad.startswith("Una caja")
+    por_caja = True if variable == "Germinó" else (unidad.startswith("Una caja") and not solo_columnas)
+    if solo_columnas:
+        st.sidebar.caption("Este archivo no tiene cajas (cada columna es un tratamiento y cada fila "
+                           "una semilla), así que cada dato es una semilla.")
     if variable == "Germinó":
         st.sidebar.caption("La germinación se calcula como % de semillas germinadas en cada caja.")
     unidad_txt = "cajas" if por_caja else "semillas"
@@ -3578,7 +3839,7 @@ def main():
     st.sidebar.header("5 · Descartes y correcciones")
     sugeridas_cm = hojas_probables_cm(df)
     hojas_cm = st.sidebar.multiselect(
-        "Hojas medidas en cm (convertir a mm)",
+        "Hojas que ya estaban en cm sin indicarlo (no dividir entre 10)",
         sorted(df.loc[df["Unidad original"] == "mm", "Hoja"].unique()),
         help="Los archivos con la nota 'Longitud dada en cm' se convierten solos. Marca aquí "
         "las hojas en cm que no lo indican."
@@ -3591,20 +3852,25 @@ def main():
         "Excluir cajas vacías (no realizadas)", value=True,
         help="Cajas sin ninguna longitud registrada. En los archivos son bloques de plantilla "
         "capturados con Germinó = 0; si se incluyen cuentan como 0 % de germinación.")}
+    hay_no_germinadas = bool((pd.to_numeric(df["Germinó"], errors="coerce") == 0).any())
     if variable in ("Raíz", "Tallo"):
         kw_ng = dict(help="Excluirlas: el promedio describe solo a las semillas que crecieron. "
-                     "Incluirlas: cada semilla no germinada entra con 0 mm y la varianza aumenta. "
+                     "Incluirlas: cada semilla no germinada entra con 0 cm y la varianza aumenta. "
                      "Elige una opción para poder analizar raíz o tallo.",
                      key=f"no_germ_{variable}")
-        try:
-            ng = st.sidebar.radio("Semillas que no germinaron",
-                                  ["Excluirlas del promedio", "Incluirlas con longitud 0"],
-                                  index=None, **kw_ng)
-        except TypeError:
-            ng = st.sidebar.radio("Semillas que no germinaron",
-                                  ["(elige una opción)", "Excluirlas del promedio",
-                                   "Incluirlas con longitud 0"], **kw_ng)
-            ng = None if ng.startswith("(") else ng
+        if not hay_no_germinadas:
+            ng = "Excluirlas del promedio"
+            st.sidebar.caption("Todas las semillas de los archivos elegidos germinaron.")
+        else:
+            try:
+                ng = st.sidebar.radio("Semillas que no germinaron",
+                                      ["Excluirlas del promedio", "Incluirlas con longitud 0"],
+                                      index=None, **kw_ng)
+            except TypeError:
+                ng = st.sidebar.radio("Semillas que no germinaron",
+                                      ["(elige una opción)", "Excluirlas del promedio",
+                                       "Incluirlas con longitud 0"], **kw_ng)
+                ng = None if ng.startswith("(") else ng
         if ng is None:
             st.sidebar.warning("Elige qué hacer con las semillas que no germinaron.")
             op["no_germinadas"] = None
@@ -3618,8 +3884,9 @@ def main():
         serie = pd.to_numeric(filtrar(df)[variable], errors="coerce")
         serie = serie[serie > 0]
         if not serie.empty and st.sidebar.checkbox("Excluir valores fuera de un rango"):
-            op["rango"] = st.sidebar.slider(f"Rango válido de {variable.lower()} (mm)", 0,
-                                            int(np.ceil(serie.max())), (0, int(np.ceil(serie.max()))))
+            tope = float(np.ceil(serie.max()))
+            op["rango"] = st.sidebar.slider(f"Rango válido de {variable.lower()} (cm)", 0.0, tope,
+                                            (0.0, tope), step=0.1)
         op["atipicos"] = st.sidebar.checkbox(
             "Excluir valores atípicos de cada grupo",
             help="Quita valores fuera de Q1 − k·IQR y Q3 + k·IQR dentro de su grupo.")
@@ -3664,7 +3931,7 @@ def main():
         c1, c2, c3, c4 = st.columns([1.3, 1.2, 1, 1.2])
         c1.markdown(f"**Experimento**\n\n{tipo}")
         c2.markdown("**Archivos**\n\n" + "<br>".join(sel_archivos), unsafe_allow_html=True)
-        c3.markdown(f"**Variable**\n\n{'Germinación (%)' if variable == 'Germinó' else f'{variable} (mm)'}")
+        c3.markdown(f"**Variable**\n\n{'Germinación (%)' if variable == 'Germinó' else f'{variable} (cm)'}")
         c4.markdown(f"**Se compara por**\n\n{agrupacion_texto}")
         st.caption(f"**Pregunta del experimento:** {config['pregunta']}  ·  **Filtros:** "
                    f"{texto_filtros}  ·  **α** = {alfa}  ·  **Cada dato es:** una "
@@ -3676,14 +3943,14 @@ def main():
                 "no germinaron**:\n\n"
                 "- **Excluirlas del promedio:** el promedio describe solo a las semillas que "
                 "crecieron.\n"
-                f"- **Incluirlas con longitud 0:** cada semilla no germinada cuenta como 0 mm de "
+                f"- **Incluirlas con longitud 0:** cada semilla no germinada cuenta como 0 cm de "
                 f"{variable.lower()}, así que el promedio mezcla cuánto creció con cuántas germinaron.")
         st.stop()
 
     zona_metricas = st.container()
     tabs = st.tabs(["📌 Resumen", "📊 Promedio, DE y varianza", "🧮 ANOVA", "🔠 Tukey",
-                    "🔡 LSD", "🧹 Descartes", "📈 Más gráficas", "📥 Descargas"])
-    (t_res, t_desc, t_anova, t_tukey, t_lsd, t_desc_m, t_graf, t_pdf) = tabs
+                    "🔡 LSD", "🧹 Descartes", "📦 Caja por caja", "📈 Más gráficas", "📥 Descargas"])
+    (t_res, t_desc, t_anova, t_tukey, t_lsd, t_desc_m, t_cajas, t_graf, t_pdf) = tabs
 
     # ================================================================== descartes semilla por semilla
     _, reg_auto = aplicar_descartes(df_filtrado, variable, op)
@@ -3703,7 +3970,7 @@ def main():
                              "Germinó", "Raíz", "Tallo"]].copy()
         vista.insert(0, "Descartar", vista["ID semilla"].isin(manuales.keys()))
         vista["Ya descartada por"] = vista["ID semilla"].map(motivo_auto).fillna("")
-        vista = vista.rename(columns={"No": "Semilla n.º", "Raíz": "Raíz (mm)", "Tallo": "Tallo (mm)",
+        vista = vista.rename(columns={"No": "Semilla n.º", "Raíz": "Raíz (cm)", "Tallo": "Tallo (cm)",
                                       "Germinó": "Germinó (1 = sí)"}).set_index("ID semilla")
         with st.form("form_descartes"):
             motivo = st.text_input("Motivo para las semillas que marques ahora", value="Descarte manual")
@@ -3755,7 +4022,7 @@ def main():
     # métricas generales (se muestran arriba de las pestañas)
     m1, m2, m3, m4, m5, m6 = zona_metricas.columns(6)
     m1.metric("Semillas analizadas", f"{len(df_semilla):,}")
-    m2.metric("Cajas", df_semilla["Corrida"].nunique())
+    m2.metric("Columnas (tratamientos)" if solo_columnas else "Cajas", df_semilla["Corrida"].nunique())
     m3.metric("Grupos comparados", df_an["Grupo"].nunique() if not df_an.empty else 0)
     m4.metric(f"Datos ({unidad_txt})", len(df_an))
     m5.metric("% germinación global", f"{df_semilla[columna_germinacion(df_semilla)].mean() * 100:.1f} %"
@@ -3783,7 +4050,10 @@ def main():
                       ", ".join(f"{g} (n = {n})" for g, n in pocos.items()) +
                       ". Con tan pocos datos las pruebas solo detectan diferencias grandes; "
                       "un grupo con 1 dato no entra al ANOVA.")
-    if not por_caja:
+    if solo_columnas:
+        avisos.append("Cada dato es una semilla (el archivo no tiene cajas): los grados de libertad "
+                      "del error son semillas − grupos. T-01 es el control sin tratamiento.")
+    elif not por_caja:
         avisos.append("Cada dato es una semilla: los grados de libertad del error son "
                       "semillas − grupos y las pruebas tienden a encontrar diferencias que no "
                       "son reales. Para el reporte usa 'una caja'.")
@@ -4227,7 +4497,7 @@ def main():
             if fig is not None:
                 _grafica(fig, "lsd_intervalos")
             st.markdown("#### ¿Qué pares de grupos difieren?")
-            st.caption("Cada barra es un par de grupos y mide cuántos mm más midió el primero que el "
+            st.caption("Cada barra es un par de grupos y mide cuántos cm más midió el primero que el "
                        "segundo. La marca blanca con borde negro sobre cada barra es la LSD: la diferencia mínima "
                        "para que la prueba la considere real. **Si la barra pasa la marca, es verde y "
                        "los grupos sí difieren; si se queda antes, es gris y no difieren.**")
@@ -4242,11 +4512,11 @@ def main():
         st.markdown("#### Registro de lo que se descartó")
         reglas = [f"Cajas vacías: {'se excluyen' if op.get('cajas_vacias') else 'se incluyen'}"]
         if variable in ("Raíz", "Tallo"):
-            reglas.append(f"No germinadas: {'se excluyen' if op.get('no_germinadas') == 'excluir' else 'entran con 0 mm'}")
+            reglas.append(f"No germinadas: {'se excluyen' if op.get('no_germinadas') == 'excluir' else 'entran con 0 cm'}")
             if op.get("ceros_germinadas"): reglas.append(f"Germinadas con {variable.lower()} = 0: se excluyen")
-            if op.get("rango"): reglas.append(f"Rango válido: {op['rango'][0]}–{op['rango'][1]} mm")
+            if op.get("rango"): reglas.append(f"Rango válido: {op['rango'][0]:g}–{op['rango'][1]:g} cm")
             if op.get("atipicos"): reglas.append(f"Atípicos: regla {op.get('factor_iqr', 1.5):g} × IQR por grupo")
-        if hojas_cm: reglas.append("Convertidas de cm a mm: " + ", ".join(hojas_cm))
+        if hojas_cm: reglas.append("Hojas en cm sin indicarlo (no se dividieron entre 10): " + ", ".join(hojas_cm))
         if manuales: reglas.append(f"Semillas descartadas a mano: {len(manuales)}")
         st.caption(" · ".join(reglas))
         if registro.empty:
@@ -4263,6 +4533,10 @@ def main():
             st.download_button("⬇️ Descargar registro de descartes (CSV)",
                                registro.to_csv(index=False).encode("utf-8-sig"),
                                file_name="registro_descartes.csv", mime="text/csv")
+
+    # ================================================================== CAJA POR CAJA
+    with t_cajas:
+        tab_caja_por_caja(df_filtrado, df_semilla, variable)
 
     # ================================================================== MÁS GRÁFICAS
     with t_graf:
